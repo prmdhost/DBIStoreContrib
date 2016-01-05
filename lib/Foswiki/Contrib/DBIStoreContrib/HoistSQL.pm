@@ -584,168 +584,20 @@ sub _hoist {
         $result{type}       = $rhs{type};
         $result{ignore_tid} = 1;
     }
-    elsif ( $arity == 2 && defined $bop_map{$op} ) {
-
+    elsif ( $arity == 2 && defined $bop_map{$op} ) {    
+        
         my $lhs = $node->{params}[0];
         my %lhs = _hoist( $lhs, $in_table );
-
+        
         my $rhs = $node->{params}[1];
         my %rhs = _hoist( $rhs, $in_table );
 
-        my $opfn = $bop_map{$op};
-
-        if (   ( $lhs{is_select} || $lhs{is_table_name} )
-            && ( $rhs{is_select} || $rhs{is_table_name} ) )
-        {
-
-            # TABLE - TABLE
-
-            my $lhs_alias = _alias(__LINE__);
-            my $rhs_alias = _alias(__LINE__);
-
-            $result{sel} = _alias(__LINE__);
-            if ( $op eq 'or' ) {
-
-                # Special case for OR, because the OR operator
-                # doesn't work the way the other operators do when
-                # it's used on two tables. Not sure why, it ought
-                # to work AFAICT from RTFM, but it doesn't.
-                my $union_alias = _alias(__LINE__);
-                my ( $lhs_sql, $rhs_sql );
-
-                if ( $lhs{ignore_tid} ) {
-
-                    # Don't propagate tids from the LHS
-                    $lhs_sql = _SELECT(
-                        select  => _AS( 'tid', $lhs_alias ),
-                        FROM    => 'topic',
-                        WHERE   => 'EXISTS(' . $lhs{sql} . ')',
-                        monitor => __LINE__
-                    );
-                }
-                else {
-                    $lhs_sql = _SELECT(
-                        select  => 'tid',
-                        FROM    => _AS( $lhs{sql}, $lhs_alias ),
-                        monitor => __LINE__
-                    );
-                }
-
-                if ( $rhs{ignore_tid} ) {
-
-                    # Don't propagate tids from the RHS
-                    $rhs_sql = _SELECT(
-                        select  => _AS( 'tid', $rhs_alias ),
-                        FROM    => 'topic',
-                        WHERE   => 'EXISTS(' . $rhs{sql} . ')',
-                        monitor => __LINE__
-                    );
-                }
-                else {
-                    $rhs_sql = _SELECT(
-                        select  => 'tid',
-                        FROM    => _AS( $rhs{sql}, $rhs_alias ),
-                        monitor => __LINE__
-                    );
-                }
-
-                my $union_sql = _UNION( $lhs_sql, $rhs_sql );
-
-                $result{sql} = _SELECT(
-                    select =>
-                      [ 'DISTINCT ' . _AS( $TRUE => $result{sel} ), 'tid' ],
-                    FROM    => _AS( $union_sql, $union_alias ),
-                    monitor => __LINE__
-                );
-                $result{is_select}  = 1;
-                $result{type}       = $TRUE_TYPE;
-                $result{ignore_tid} = 0;
-            }
-            else {
-                # All other non-OR table-table operators
-                if ( defined $rhs{sel} ) {
-                    $lhs{sel} = $rhs{sel} unless defined $lhs{sel};
-                }
-                elsif ( defined $lhs{sel} ) {
-                    $rhs{sel} = $lhs{sel};
-                }
-                else {
-                    _abort(
-"Cannot '$op' two tables without at least one selector:",
-                        $node
-                    );
-                }
-                my $l_sel =
-                  "$lhs_alias." . _personality()->safe_id( $lhs{sel} );
-                my $r_sel =
-                  "$rhs_alias." . _personality()->safe_id( $rhs{sel} );
-
-                my ( $expr, $optype ) = &$opfn(
-                    $l_sel => $lhs{type},
-                    $r_sel => $rhs{type}
-                );
-                my $where = "($lhs_alias.tid=$rhs_alias.tid)";
-                if ( $optype == BOOLEAN ) {
-                    #$where .= " AND ($expr)";
-                    $expr   = $TRUE;
-                    $optype = $TRUE_TYPE;
-                }
-
-                my $ret_tid   = "$lhs_alias.tid";
-                my $tid_table = '';
-                if ( $rhs{ignore_tid} || $lhs{ignore_tid} ) {
-                    $ret_tid   = 'topic.tid';
-                    $tid_table = 'topic,';
-                }
-                $result{sql} = _SELECT(
-                    select =>
-                      [ 'DISTINCT ' . _AS( $expr => $result{sel} ), $ret_tid ],
-                    FROM => $tid_table
-                      . _AS(
-                        $lhs{sql} => $lhs_alias,
-                        $rhs{sql} => $rhs_alias
-                      ),
-                    WHERE   => $where,
-                    monitor => __LINE__
-                );
-                $result{is_select} = 1;
-                $result{has_where} = length($where);
-                $result{type}      = $optype;
-            }
-        }
-        elsif ( $lhs{is_select} || $lhs{is_table_name} ) {
-
-            # TABLE - CONSTANT
-            my $operate = sub {
-                my $sel = shift;
-                return &$opfn(
-                    $sel      => $lhs{type},
-                    $rhs{sql} => $rhs{type}
-                );
-            };
-            _genSingleTableSELECT( \%lhs, $operate, \%result,
-                __LINE__ . " $op" );
-        }
-        elsif ( $rhs{is_select} ) {
-
-            # CONSTANT - TABLE
-            my $operate = sub {
-                my $sel = shift;
-                return &$opfn(
-                    $lhs{sql} => $lhs{type},
-                    $sel      => $rhs{type}
-                );
-            };
-            _genSingleTableSELECT( \%rhs, $operate, \%result,
-                __LINE__ . " $op" );
-        }
-        else {
-
-            # CONSTANT - CONSTANT
-            ( $result{sql}, $result{type} ) = &$opfn(
-                $lhs{sql} => $lhs{type},
-                $rhs{sql} => $rhs{type}
-            );
+        %result = _hoistBinaryOperation(\%lhs, \%rhs, $node, $in_table);
+        
+        for (my $i = 2; $i < @{$node->{params}}; $i++) {
+            my $rhs = $node->{params}[$i];
+            my %rhs = _hoist( $rhs, $in_table );
+            %result = _hoistBinaryOperation(\%result, \%rhs, $node, $in_table);
         }
     }
     elsif ( $arity == 1 && defined $uop_map{$op} ) {
@@ -775,6 +627,172 @@ sub _hoist {
 #        Foswiki::Func::writeDebug( "table name")               if $result{is_table_name};
 #        Foswiki::Func::writeDebug( _format_SQL( $result{sql} ) . "");
 #    }
+    return %result;
+}
+
+sub _hoistBinaryOperation {
+    my ( $lhs, $rhs, $node, $in_table) = @_;
+    
+    my %result;
+    
+    my $op = $node->{op}->{name}  if ref( $node->{op} );
+    
+    my $opfn = $bop_map{$op};
+
+    if (   ( $lhs->{is_select} || $lhs->{is_table_name} )
+        && ( $rhs->{is_select} || $rhs->{is_table_name} ) )
+    {
+
+        # TABLE - TABLE
+
+        my $lhs_alias = _alias(__LINE__);
+        my $rhs_alias = _alias(__LINE__);
+
+        $result{sel} = _alias(__LINE__);
+        if ( $op eq 'or' ) {
+
+            # Special case for OR, because the OR operator
+            # doesn't work the way the other operators do when
+            # it's used on two tables. Not sure why, it ought
+            # to work AFAICT from RTFM, but it doesn't.
+            my $union_alias = _alias(__LINE__);
+            my ( $lhs_sql, $rhs_sql );
+
+            if ( $lhs->{ignore_tid} ) {
+
+                # Don't propagate tids from the LHS
+                $lhs_sql = _SELECT(
+                    select  => _AS( 'tid', $lhs_alias ),
+                    FROM    => 'topic',
+                    WHERE   => 'EXISTS(' . $lhs->{sql} . ')',
+                    monitor => __LINE__
+                );
+            }
+            else {
+                $lhs_sql = _SELECT(
+                    select  => 'tid',
+                    FROM    => _AS( $lhs->{sql}, $lhs_alias ),
+                    monitor => __LINE__
+                );
+            }
+
+            if ( $rhs->{ignore_tid} ) {
+
+                # Don't propagate tids from the RHS
+                $rhs_sql = _SELECT(
+                    select  => _AS( 'tid', $rhs_alias ),
+                    FROM    => 'topic',
+                    WHERE   => 'EXISTS(' . $rhs->{sql} . ')',
+                    monitor => __LINE__
+                );
+            }
+            else {
+                $rhs_sql = _SELECT(
+                    select  => 'tid',
+                    FROM    => _AS( $rhs->{sql}, $rhs_alias ),
+                    monitor => __LINE__
+                );
+            }
+
+            my $union_sql = _UNION( $lhs_sql, $rhs_sql );
+
+            $result{sql} = _SELECT(
+                select =>
+                  [ 'DISTINCT ' . _AS( $TRUE => $result{sel} ), 'tid' ],
+                FROM    => _AS( $union_sql, $union_alias ),
+                monitor => __LINE__
+            );
+            $result{is_select}  = 1;
+            $result{type}       = $TRUE_TYPE;
+            $result{ignore_tid} = 0;
+        }
+        else {
+            # All other non-OR table-table operators
+            if ( defined $rhs->{sel} ) {
+                $lhs->{sel} = $rhs->{sel} unless defined $lhs->{sel};
+            }
+            elsif ( defined $lhs->{sel} ) {
+                $rhs->{sel} = $lhs->{sel};
+            }
+            else {
+                _abort(
+"Cannot '$op' two tables without at least one selector:",
+                    $node
+                );
+            }
+            my $l_sel =
+              "$lhs_alias." . _personality()->safe_id( $lhs->{sel} );
+            my $r_sel =
+              "$rhs_alias." . _personality()->safe_id( $rhs->{sel} );
+
+            my ( $expr, $optype ) = &$opfn(
+                $l_sel => $lhs->{type},
+                $r_sel => $rhs->{type}
+            );
+            my $where = "($lhs_alias.tid=$rhs_alias.tid)";
+            if ( $optype == BOOLEAN ) {
+                #$where .= " AND ($expr)";
+                $expr   = $TRUE;
+                $optype = $TRUE_TYPE;
+            }
+
+            my $ret_tid   = "$lhs_alias.tid";
+            my $tid_table = '';
+            if ( $rhs->{ignore_tid} || $lhs->{ignore_tid} ) {
+                $ret_tid   = 'topic.tid';
+                $tid_table = 'topic,';
+            }
+            $result{sql} = _SELECT(
+                select =>
+                  [ 'DISTINCT ' . _AS( $expr => $result{sel} ), $ret_tid ],
+                FROM => $tid_table
+                  . _AS(
+                    $lhs->{sql} => $lhs_alias,
+                    $rhs->{sql} => $rhs_alias
+                  ),
+                WHERE   => $where,
+                monitor => __LINE__
+            );
+            $result{is_select} = 1;
+            $result{has_where} = length($where);
+            $result{type}      = $optype;
+        }
+    }
+    elsif ( $lhs->{is_select} || $lhs->{is_table_name} ) {
+
+        # TABLE - CONSTANT
+        my $operate = sub {
+            my $sel = shift;
+            return &$opfn(
+                $sel      => $lhs->{type},
+                $rhs->{sql} => $rhs->{type}
+            );
+        };
+        _genSingleTableSELECT( $lhs, $operate, \%result,
+            __LINE__ . " $op" );
+    }
+    elsif ( $rhs->{is_select} ) {
+
+        # CONSTANT - TABLE
+        my $operate = sub {
+            my $sel = shift;
+            return &$opfn(
+                $lhs->{sql} => $lhs->{type},
+                $sel      => $rhs->{type}
+            );
+        };
+        _genSingleTableSELECT( $rhs, $operate, \%result,
+            __LINE__ . " $op" );
+    }
+    else {
+
+        # CONSTANT - CONSTANT
+        ( $result{sql}, $result{type} ) = &$opfn(
+            $lhs->{sql} => $lhs->{type},
+            $rhs->{sql} => $rhs->{type}
+        );
+    }
+    
     return %result;
 }
 
@@ -993,7 +1011,7 @@ sub _rewrite {
         $node->{is_table} = 1;
     }
     else {
-        for ( my $i = 0 ; $i < $op->{arity} ; $i++ ) {
+        for ( my $i = 0 ; $i < @{$node->{params}} ; $i++ ) {
             my $nn = _rewrite( $node->{params}[$i], $context );
             $node->{params}[$i] = $nn;
         }
@@ -1091,7 +1109,7 @@ sub recreate {
 
     if ( ref( $node->{op} ) ) {
         my @oa;
-        for ( my $i = 0 ; $i < $node->{op}->{arity} ; $i++ ) {
+        for ( my $i = 0 ; $i < @{$node->{params}}; $i++ ) {
             my $nprec = $node->{op}->{prec};
             $nprec++ if $i > 0;
             $nprec = 0 if $node->{op}->{close};

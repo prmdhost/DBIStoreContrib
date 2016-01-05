@@ -19,6 +19,7 @@ use Foswiki::Search::Node             ();
 use Foswiki::Meta                     ();
 use Foswiki::Search::InfoCache        ();
 use Foswiki::Search::ResultSet        ();
+use Foswiki::Iterator::PagerIterator  ();
 use Foswiki::MetaCache                ();
 use Foswiki::Query::Node              ();
 use Foswiki::Contrib::DBIStoreContrib ();
@@ -157,7 +158,7 @@ sub query {
     }
 
     # Got to be something worth searching for
-    return new Foswiki::Search::ResultSet( [] )
+    return new Foswiki::Iterator::PagerIterator(new Foswiki::Search::ResultSet( [] ), 1, 1)
       unless $hoist_control{iwebs} && scalar( @{ $hoist_control{iwebs} } );
 
     if ($topics) {
@@ -210,8 +211,16 @@ sub query {
         my ( $Iweb, $topic ) =
           $Foswiki::Plugins::SESSION->normalizeWebTopicName( undef, $webtopic );
 
+        my $topicMeta =
+              $Foswiki::Plugins::SESSION->search->metacache->addMeta( $Iweb,
+                $topic );
+        if ( not defined($topicMeta) ) {
+            $topicMeta =
+              new Foswiki::Meta( $Foswiki::Plugins::SESSION, $Iweb, $topic );
+        }
+          
         my $cache =
-          $Foswiki::Plugins::SESSION->search->metacache->get( $Iweb, $topic );
+          $Foswiki::Plugins::SESSION->search->metacache->get( $Iweb, $topic, $topicMeta );
         my $meta = $cache->{tom};
 
         # Note that we filter the non-web topic name
@@ -243,10 +252,11 @@ sub query {
 
     # We have to pre-sort the result sets by web name to mimic the
     # behaviour of default search.
-    my $resultset = new Foswiki::Search::ResultSet(
+    my $resultset = new Foswiki::Iterator::PagerIterator( new Foswiki::Search::ResultSet(
         [ map { $results{$_} } sort( keys(%results) ) ],
         $options->{groupby}, $options->{order},
-        Foswiki::isTrue( $options->{reverse} ) );
+        Foswiki::isTrue( $options->{reverse} ) ),
+            $options->{pagesize}, $options->{showpage} );
 
     #TODO: $options should become redundant
     $resultset->sortResults($options);

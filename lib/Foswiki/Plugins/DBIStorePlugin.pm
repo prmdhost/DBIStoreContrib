@@ -19,15 +19,6 @@ our $SHORTDESCRIPTION =
 use constant TRACE => 0;
 
 sub initPlugin {
-    if ( $Foswiki::Plugins::SESSION->{store}->can('recordChange') ) {
-
-        # Will not enable this plugin if recordChange is present,
-        # as this is Foswiki >=1.2
-        Foswiki::Func::writeDebug(
-            "DBIStorePlugin not required; can recordChange")
-          if TRACE;
-        return 0;
-    }
 
     # If the getField method is missing, then get it from the BruteForce
     # module that it was moved from.
