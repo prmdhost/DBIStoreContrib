@@ -19,6 +19,15 @@ our $SHORTDESCRIPTION =
 use constant TRACE => 0;
 
 sub initPlugin {
+    if ( $Foswiki::Plugins::SESSION->{store}->can('recordChange') ) {
+
+        # Will not enable this plugin if recordChange is present,
+        # as this is Foswiki >=1.2
+        Foswiki::Func::writeDebug(
+            "DBIStorePlugin not required; can recordChange")
+          if TRACE;
+        return 0;
+    }
 
     # If the getField method is missing, then get it from the BruteForce
     # module that it was moved from.
@@ -96,7 +105,7 @@ sub afterRenameHandler {
           . " to $newWeb."
           . ( $newTopic || '' ) . ':'
           . ( $newa || '' ) )
-      if TRACE;
+          if TRACE;
 
     my $oldo = 
         new Foswiki::Meta( $Foswiki::Plugins::SESSION, $oldWeb, $oldTopic );
@@ -106,8 +115,8 @@ sub afterRenameHandler {
     Foswiki::Contrib::DBIStoreContrib::start();
     
     if ($oldTopic) {
-        Foswiki::Contrib::DBIStoreContrib::remove($oldo);    #, $olda );
-        Foswiki::Contrib::DBIStoreContrib::insert($newo);    #, $newa );
+        Foswiki::Contrib::DBIStoreContrib::remove($oldo, $olda );
+        Foswiki::Contrib::DBIStoreContrib::insert($newo, $newa );
     } else {
         #rename web
         Foswiki::Contrib::DBIStoreContrib::rename($oldo, $newo);

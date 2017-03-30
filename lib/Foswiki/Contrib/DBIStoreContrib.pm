@@ -536,7 +536,7 @@ sub remove {
         my $tids = $dbh->selectcol_arrayref($sql);
         return unless scalar(@$tids);
 
-        if ( defined $attachment ) {
+        if ( $attachment ) {
 
             ASSERT( scalar(@$tids) == 1 ) if DEBUG;
 
@@ -562,7 +562,7 @@ sub remove {
             }
         }
         else {
-
+        
             foreach my $tid (@$tids) {
                 _say "\tRemove $tid" if MONITOR;
                 my $tables = $dbh->selectcol_arrayref('SELECT name FROM metatypes');
